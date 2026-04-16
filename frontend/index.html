@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI Receptionist Prototype</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="header">
+        <h1>AI Receptionist Prototype</h1>
+        <p class="subtitle">
+          First milestone demo for a single-hotel AI receptionist: one-click booking request submission
+          (frontend → FastAPI backend → PostgreSQL).
+        </p>
+      </header>
+
+      <section class="card">
+        <button id="sendBtn" class="primary" type="button">
+          Send Booking Request
+        </button>
+
+        <div id="status" class="status" aria-live="polite"></div>
+      </section>
+
+      <footer class="footer">
+        <a href="/docs" target="_blank" rel="noreferrer">Backend API Docs</a>
+        <span class="dot">•</span>
+        <a href="/api/booking-requests" target="_blank" rel="noreferrer">View Saved Requests (JSON)</a>
+      </footer>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
+
