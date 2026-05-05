@@ -1,4 +1,5 @@
 import logging
+import uuid
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,11 +8,15 @@ from sqlalchemy.orm import Session
 
 from .database import get_db
 from .models import BookingRequest
-from .schemas import BookingRequestCreate, BookingRequestOut
+from .schemas import BookingRequestCreate, BookingRequestOut, ChatRequest, ChatResponse
 
 logger = logging.getLogger("app.routes")
 
 router = APIRouter()
+
+PLACEHOLDER_REPLY = (
+    "Thank you for your message. I have received your booking inquiry and will help you step by step."
+)
 
 
 @router.post("/api/booking-request", response_model=BookingRequestOut)
@@ -36,6 +41,12 @@ def list_booking_requests(db: Session = Depends(get_db)):
         .limit(100)
         .all()
     )
+
+
+@router.post("/api/chat", response_model=ChatResponse)
+def chat(payload: ChatRequest):
+    session_id = payload.session_id or str(uuid.uuid4())
+    return ChatResponse(reply=PLACEHOLDER_REPLY, session_id=session_id)
 
 
 @router.get("/health")

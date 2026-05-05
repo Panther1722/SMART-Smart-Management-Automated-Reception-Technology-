@@ -3,15 +3,10 @@ const input = document.getElementById("messageInput");
 const btn = document.getElementById("sendBtn");
 const messagesEl = document.getElementById("messages");
 
+let sessionId = null;
+
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function formatTimestamp(isoLikeString) {
-  if (!isoLikeString) return "";
-  const dt = new Date(isoLikeString);
-  if (Number.isNaN(dt.getTime())) return String(isoLikeString);
-  return dt.toLocaleString();
 }
 
 function appendMessage(role, text, { kind = "normal", meta = "" } = {}) {
@@ -35,11 +30,11 @@ function appendMessage(role, text, { kind = "normal", meta = "" } = {}) {
   scrollToBottom();
 }
 
-async function postBookingRequest(message) {
-  const res = await fetch("/api/booking-request", {
+async function postChat(message) {
+  const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, session_id: sessionId }),
   });
 
   if (!res.ok) {
@@ -63,9 +58,11 @@ async function onSend(text) {
   input.disabled = true;
 
   try {
-    const data = await postBookingRequest(trimmed);
-    const meta = data?.id ? `Saved as request #${data.id}${data?.created_at ? ` • ${formatTimestamp(data.created_at)}` : ""}` : "";
-    appendMessage("assistant", "Thanks — I’ve saved your message. (LLM not connected yet.)", { meta });
+    const data = await postChat(trimmed);
+    sessionId = data?.session_id ?? sessionId;
+    appendMessage("assistant", data?.reply ?? "Thanks — I’ve received your message.", {
+      meta: sessionId ? `session_id: ${sessionId}` : "",
+    });
   } catch (e) {
     appendMessage("assistant", `Sorry — I couldn’t save that message. ${e.message}`, {
       kind: "err",
