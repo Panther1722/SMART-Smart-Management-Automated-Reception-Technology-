@@ -7,6 +7,8 @@
   --accent: #4f8cff;
   --accent-2: #2dd4bf;
   --danger: #ff5d5d;
+  --bubble-user: rgba(79, 140, 255, 0.22);
+  --bubble-assistant: rgba(255, 255, 255, 0.08);
 }
 
 * {
@@ -55,7 +57,6 @@ body {
 }
 
 .primary {
-  width: 100%;
   border: 0;
   border-radius: 14px;
   padding: 14px 16px;
@@ -78,27 +79,101 @@ body {
   opacity: 0.85;
 }
 
-.status {
-  margin-top: 14px;
-  padding: 12px 12px;
-  border-radius: 12px;
-  border: 1px dashed rgba(255, 255, 255, 0.18);
-  color: var(--muted);
-  min-height: 44px;
+.chat {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  gap: 14px;
+  min-height: 460px;
+}
+
+.messages {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.14);
+  padding: 14px;
+  overflow: auto;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.message {
+  display: flex;
+}
+
+.message.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  max-width: min(640px, 88%);
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message.user .bubble {
+  background: var(--bubble-user);
+  border-color: rgba(79, 140, 255, 0.28);
+}
+
+.message.assistant .bubble {
+  background: var(--bubble-assistant);
+}
+
+.meta {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.message.err .bubble {
+  border-color: rgba(255, 93, 93, 0.4);
+}
+
+.message.err .meta {
+  color: rgba(255, 210, 210, 0.82);
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
   align-items: center;
 }
 
-.status.ok {
-  border-style: solid;
-  border-color: rgba(45, 212, 191, 0.35);
-  color: rgba(210, 255, 248, 0.92);
+.input {
+  width: 100%;
+  border-radius: 14px;
+  padding: 14px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--text);
+  outline: none;
 }
 
-.status.err {
-  border-style: solid;
-  border-color: rgba(255, 93, 93, 0.4);
-  color: rgba(255, 220, 220, 0.92);
+.input::placeholder {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.input:focus {
+  border-color: rgba(79, 140, 255, 0.55);
+  box-shadow: 0 0 0 4px rgba(79, 140, 255, 0.16);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+  white-space: nowrap;
 }
 
 .footer {

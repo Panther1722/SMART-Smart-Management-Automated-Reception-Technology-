@@ -11,17 +11,27 @@
       <header class="header">
         <h1>AI Receptionist Prototype</h1>
         <p class="subtitle">
-          First milestone demo for a single-hotel AI receptionist: one-click booking request submission
-          (frontend → FastAPI backend → PostgreSQL).
+          Simple chat UI (frontend → FastAPI backend → PostgreSQL). Messages are saved via the existing API.
         </p>
       </header>
 
       <section class="card">
-        <button id="sendBtn" class="primary" type="button">
-          Send Booking Request
-        </button>
+        <div class="chat" aria-label="Chat">
+          <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
 
-        <div id="status" class="status" aria-live="polite"></div>
+          <form id="chatForm" class="composer" autocomplete="off">
+            <label class="sr-only" for="messageInput">Message</label>
+            <input
+              id="messageInput"
+              class="input"
+              type="text"
+              placeholder="Type a message…"
+              maxlength="500"
+              required
+            />
+            <button id="sendBtn" class="primary" type="submit">Send</button>
+          </form>
+        </div>
       </section>
 
       <footer class="footer">
