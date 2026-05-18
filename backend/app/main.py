@@ -4,9 +4,8 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .database import wait_for_db
+from .database import ensure_schema, wait_for_db
 from .models import Base
-from .database import engine
 from .routes import router
 
 
@@ -49,6 +48,6 @@ def on_startup() -> None:
     logger.info("Waiting for database...")
     wait_for_db()
     logger.info("Creating database tables (if missing)...")
-    Base.metadata.create_all(bind=engine)
+    ensure_schema(Base)
     logger.info("Startup complete.")
 

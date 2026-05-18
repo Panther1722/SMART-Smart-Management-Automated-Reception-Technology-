@@ -2,8 +2,8 @@ import os
 import time
 from typing import Generator
 
-from sqlalchemy import create_engine, text
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def _get_database_url() -> str:
@@ -20,8 +20,25 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
+BOOKING_REQUESTS_TABLE = "booking_requests"
+BOOKING_REQUESTS_COLUMNS = {
+    "id",
+    "session_id",
+    "raw_message",
+    "guest_name",
+    "guest_email",
+    "guest_phone",
+    "check_in",
+    "check_out",
+    "guests_count",
+    "request_type",
+    "special_request",
+    "ai_reply",
+    "created_at",
+}
 
-def get_db() -> Generator:
+
+def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         yield db
@@ -41,3 +58,26 @@ def wait_for_db(max_attempts: int = 30, sleep_seconds: float = 1.0) -> None:
             time.sleep(sleep_seconds)
     raise RuntimeError(f"Database not reachable after {max_attempts} attempts") from last_err
 
+
+def _should_reset_schema() -> bool:
+    return os.getenv("DB_RESET_SCHEMA", "").lower() in ("1", "true", "yes")
+
+
+def _booking_requests_schema_is_current() -> bool:
+    inspector = inspect(engine)
+    if not inspector.has_table(BOOKING_REQUESTS_TABLE):
+        return False
+    existing = {column["name"] for column in inspector.get_columns(BOOKING_REQUESTS_TABLE)}
+    return existing == BOOKING_REQUESTS_COLUMNS
+
+
+def ensure_schema(base) -> None:
+    """Create tables and replace booking_requests when the schema changed."""
+    from .models import BookingRequest
+
+    inspector = inspect(engine)
+    if _should_reset_schema() or not _booking_requests_schema_is_current():
+        if inspector.has_table(BOOKING_REQUESTS_TABLE):
+            BookingRequest.__table__.drop(engine, checkfirst=True)
+
+    base.metadata.create_all(bind=engine)

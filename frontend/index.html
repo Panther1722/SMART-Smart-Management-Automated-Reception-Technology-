@@ -4,44 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Receptionist Prototype</title>
-    <link rel="stylesheet" href="./style.css" />
   </head>
   <body>
-    <main class="container">
-      <header class="header">
-        <h1>AI Receptionist Prototype</h1>
-        <p class="subtitle">
-          Simple chat UI (frontend → FastAPI backend → PostgreSQL). Messages are saved via the existing API.
-        </p>
-      </header>
-
-      <section class="card">
-        <div class="chat" aria-label="Chat">
-          <div id="messages" class="messages" aria-live="polite" aria-relevant="additions"></div>
-
-          <form id="chatForm" class="composer" autocomplete="off">
-            <label class="sr-only" for="messageInput">Message</label>
-            <input
-              id="messageInput"
-              class="input"
-              type="text"
-              placeholder="Type a message…"
-              maxlength="500"
-              required
-            />
-            <button id="sendBtn" class="primary" type="submit">Send</button>
-          </form>
-        </div>
-      </section>
-
-      <footer class="footer">
-        <a href="/docs" target="_blank" rel="noreferrer">Backend API Docs</a>
-        <span class="dot">•</span>
-        <a href="/api/booking-requests" target="_blank" rel="noreferrer">View Saved Requests (JSON)</a>
-      </footer>
-    </main>
-
-    <script src="./app.js"></script>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>
 
