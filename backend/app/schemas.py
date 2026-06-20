@@ -1,6 +1,72 @@
 from datetime import date, datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+import re
+
+from pydantic import BaseModel, Field, field_validator
+
+_EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+VALID_REQUEST_TYPES = frozenset(
+    {
+        "booking",
+        "cancellation",
+        "pricing",
+        "availability",
+        "general inquiry",
+    }
+)
+
+RequestTypeLiteral = Literal[
+    "booking",
+    "cancellation",
+    "pricing",
+    "availability",
+    "general inquiry",
+]
+
+
+class ExtractedFieldsSchema(BaseModel):
+    """Structured booking fields stored on a request."""
+
+    guest_name: str | None = None
+    guest_email: str | None = None
+    guest_phone: str | None = None
+    check_in: date | None = None
+    check_out: date | None = None
+    guests_count: int | None = Field(default=None, ge=1)
+    special_request: str | None = None
+
+
+class LLMExtractionResult(BaseModel):
+    """Strict JSON schema for LLM structured extraction."""
+
+    guest_name: str | None = None
+    guest_email: str | None = None
+    guest_phone: str | None = None
+    check_in: date | None = None
+    check_out: date | None = None
+    guests_count: int | None = Field(default=None, ge=1)
+    request_type: RequestTypeLiteral | None = None
+    special_request: str | None = None
+    missing_fields: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @field_validator("guest_name", "guest_email", "guest_phone", "special_request", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, value: object) -> object:
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
+    @field_validator("missing_fields", mode="before")
+    @classmethod
+    def _normalize_missing_fields(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            return []
+        return [str(item).strip() for item in value if str(item).strip()]
 
 
 class BookingRequestCreate(BaseModel):
@@ -43,3 +109,43 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     session_id: str
+
+
+class ChatHistoryMessage(BaseModel):
+    id: str
+    role: str
+    text: str
+    created_at: datetime
+
+
+class ChatHistoryResponse(BaseModel):
+    session_id: str
+    guest_email: str | None = None
+    messages: list[ChatHistoryMessage]
+
+
+class SessionStartRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    session_id: str | None = Field(default=None, max_length=100)
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def _normalize_email(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("email must be a string")
+        email = value.strip().lower()
+        if not _EMAIL_RE.match(email):
+            raise ValueError("Invalid email address")
+        return email
+
+
+class SessionStartResponse(BaseModel):
+    session_id: str
+    guest_email: str
+
+
+class SessionOut(BaseModel):
+    session_id: str
+    guest_email: str
+
+    model_config = {"from_attributes": True}

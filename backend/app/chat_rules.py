@@ -2,11 +2,23 @@
 
 from __future__ import annotations
 
+from datetime import date
+
+from .field_extraction import ExtractedFields
+
 REQUEST_TYPE_BOOKING = "booking"
 REQUEST_TYPE_CANCELLATION = "cancellation"
 REQUEST_TYPE_PRICING = "pricing"
 REQUEST_TYPE_AVAILABILITY = "availability"
 REQUEST_TYPE_GENERAL = "general inquiry"
+
+BOOKING_RELATED_TYPES = frozenset(
+    {
+        REQUEST_TYPE_BOOKING,
+        REQUEST_TYPE_AVAILABILITY,
+        REQUEST_TYPE_PRICING,
+    }
+)
 
 # Order matters: check more specific intents before broader ones (e.g. booking vs availability).
 _REQUEST_TYPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
@@ -66,7 +78,7 @@ _REQUEST_TYPE_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
 )
 
-_REPLIES: dict[str, str] = {
+_DEFAULT_REPLIES: dict[str, str] = {
     REQUEST_TYPE_BOOKING: (
         "I'd be happy to help you with a booking. "
         "Could you share your preferred check-in and check-out dates, "
@@ -106,7 +118,96 @@ def detect_request_type(message: str) -> str:
     return REQUEST_TYPE_GENERAL
 
 
-def build_reply(message: str, request_type: str) -> str:
-    """Return a friendly receptionist-style reply for the detected request type."""
-    _ = message  # reserved for future rule-based personalization
-    return _REPLIES.get(request_type, _REPLIES[REQUEST_TYPE_GENERAL])
+def build_reply(request_type: str, fields: ExtractedFields) -> str:
+    """Return a receptionist-style reply based on intent and extracted fields."""
+    if request_type in BOOKING_RELATED_TYPES:
+        return _build_booking_related_reply(request_type, fields)
+
+    if request_type == REQUEST_TYPE_CANCELLATION:
+        return _build_cancellation_reply(fields)
+
+    return _DEFAULT_REPLIES.get(request_type, _DEFAULT_REPLIES[REQUEST_TYPE_GENERAL])
+
+
+def _build_booking_related_reply(request_type: str, fields: ExtractedFields) -> str:
+    has_dates = fields.check_in is not None and fields.check_out is not None
+    has_guests = fields.guests_count is not None
+
+    if has_dates and has_guests:
+        return _confirmation_reply(fields, request_type)
+
+    missing: list[str] = []
+    if fields.check_in is None:
+        missing.append("your check-in date")
+    if fields.check_out is None:
+        missing.append("your check-out date")
+    if fields.guests_count is None:
+        missing.append("how many guests will be staying")
+
+    if missing:
+        prefix = "Thanks for your message. "
+        if fields.guest_name:
+            prefix = f"Thanks, {fields.guest_name}. "
+        acknowledged: list[str] = []
+        if fields.guests_count is not None:
+            acknowledged.append(
+                f"I have {fields.guests_count} guest{'s' if fields.guests_count != 1 else ''} noted"
+            )
+        if fields.check_in and fields.check_out is None:
+            acknowledged.append(
+                f"check-in on {fields.check_in.strftime('%d %B %Y')}"
+            )
+        if fields.check_out and fields.check_in is None:
+            acknowledged.append(
+                f"check-out on {fields.check_out.strftime('%d %B %Y')}"
+            )
+        if acknowledged:
+            prefix = prefix + " ".join(acknowledged) + ". "
+        return prefix + "Could you please share " + " and ".join(missing) + "?"
+
+    return _DEFAULT_REPLIES.get(request_type, _DEFAULT_REPLIES[REQUEST_TYPE_GENERAL])
+
+
+def _build_cancellation_reply(fields: ExtractedFields) -> str:
+    if fields.guest_name and fields.check_in:
+        return (
+            f"I can help with the cancellation for {fields.guest_name} "
+            f"(check-in {fields.check_in.strftime('%d %B %Y')}). "
+            "I'll pass this to our team to review the next steps."
+        )
+    if fields.guest_name:
+        return (
+            f"Thank you, {fields.guest_name}. I can help with your cancellation — "
+            "could you share the check-in date or booking reference?"
+        )
+    return _DEFAULT_REPLIES[REQUEST_TYPE_CANCELLATION]
+
+
+def _confirmation_reply(fields: ExtractedFields, request_type: str) -> str:
+    guest_part = f"Thank you, {fields.guest_name}. " if fields.guest_name else "Thank you. "
+    stay_part = (
+        f"I have noted a stay from {fields.check_in.strftime('%d %B %Y')} "
+        f"to {fields.check_out.strftime('%d %B %Y')} "
+        f"for {fields.guests_count} guest{'s' if fields.guests_count != 1 else ''}."
+    )
+
+    if request_type == REQUEST_TYPE_PRICING:
+        action = "I'll share suitable rates for those dates."
+    elif request_type == REQUEST_TYPE_AVAILABILITY:
+        action = "I'll check availability for those dates."
+    else:
+        action = "I'll pass this to our team to confirm availability."
+
+    extra_parts: list[str] = []
+    if fields.guest_email:
+        extra_parts.append(f"email: {fields.guest_email}")
+    if fields.guest_phone:
+        extra_parts.append(f"phone: {fields.guest_phone}")
+    if fields.special_request:
+        extra_parts.append(f"special request: {fields.special_request}")
+
+    extra = ""
+    if extra_parts:
+        extra = " I also noted " + "; ".join(extra_parts) + "."
+
+    return guest_part + stay_part + " " + action + extra

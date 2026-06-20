@@ -8,6 +8,20 @@ class Base(DeclarativeBase):
     pass
 
 
+class ChatSession(Base):
+    """Guest session created before chat starts (stores pre-collected email)."""
+
+    __tablename__ = "chat_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    guest_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+
 class BookingRequest(Base):
     __tablename__ = "booking_requests"
 
