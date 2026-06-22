@@ -1,51 +1,62 @@
-# AI Receptionist Prototype – Booking Request Demo
+# AI Receptionist Prototype – Chat Booking Demo
 
-This repository contains the first working milestone of the project:
+This repository contains a working milestone of the project:
 
-Design and Development of a Single-Hotel AI Receptionist Prototype for Booking Inquiry and Request Handling
+**Design and Development of a Single-Hotel AI Receptionist Prototype for Booking Inquiry and Request Handling**
 
-The goal of this prototype is to demonstrate a complete full-stack flow where a user clicks one button on the frontend, the request is handled by a FastAPI backend, and a record is written into a PostgreSQL database.
+The prototype demonstrates a full-stack conversational flow: a guest chats with an AI receptionist on the frontend, messages are handled by a FastAPI backend, booking details are extracted from the conversation, and every turn is stored in PostgreSQL.
 
-Frontend (one button) → FastAPI backend → PostgreSQL database
+```
+Frontend (React chat UI) → FastAPI backend → PostgreSQL database
+                              ↓
+                    LLM extraction + replies (optional)
+                    Rule-based fallback when LLM is off
+```
 
-This version is intentionally minimal so it can be tested easily in Docker and GitHub Codespaces, while still serving as the technical foundation for the larger AI receptionist project.
+The stack runs in Docker Compose with one command and supports GitHub Codespaces for easy testing.
 
 ---
 
-What this prototype does
+## What this prototype does
 
-- Displays a simple web page with one main button
-- Sends a booking request from the frontend to the backend
-- Stores the request in a PostgreSQL database
-- Returns a success response to the user
+- Displays a multilingual chat interface (English, German, French, Italian, Spanish)
+- Collects the guest email before chat begins and persists the session in the browser
+- Sends messages to `POST /api/chat` and shows assistant replies in real time
+- Extracts structured booking fields (dates, guest count, request type, etc.) from conversation
+- Uses a hosted LLM (Gemini or OpenAI) when configured, with rule-based replies as fallback
+- Stores each message, extracted fields, and AI reply in PostgreSQL
+- Restores chat history when the user returns in the same browser tab
 - Runs through Docker Compose with one command
 - Supports GitHub Codespaces for instructor testing
-- Keeps a clean base for future AI receptionist features
 
 ---
 
-System flow
+## System flow
 
-1. The user opens the web page.
-2. The user clicks “Send Booking Request”.
-3. The frontend sends a request to POST /api/booking-request.
-4. The FastAPI backend validates the request.
-5. The backend writes the request into the booking_requests table in PostgreSQL.
-6. The backend returns a success response.
-7. The frontend shows a confirmation message.
+1. The user opens the web page and selects a language.
+2. The user enters their email and starts a session (`POST /api/session/start`).
+3. The user sends chat messages (`POST /api/chat`).
+4. The backend merges prior session fields, extracts new details (LLM or rules), and generates a reply.
+5. The backend writes the message, extracted fields, and `ai_reply` into `booking_requests`.
+6. The frontend displays the assistant reply and loads history on return visits.
 
-For verification, there is also an endpoint to list saved requests.
+For verification, use `GET /api/booking-requests` or `GET /api/chat-history/{session_id}`.
 
 ---
 
-Repository structure
+## Repository structure
 
 ```text
 .
 ├─ backend/
 │  ├─ app/
 │  │  ├─ __init__.py
+│  │  ├─ chat_rules.py          # Rule-based replies when LLM is disabled
 │  │  ├─ database.py
+│  │  ├─ date_normalization.py
+│  │  ├─ extraction_service.py  # LLM + rule extraction orchestration
+│  │  ├─ field_extraction.py
+│  │  ├─ llm_service.py         # Gemini / OpenAI integration
 │  │  ├─ main.py
 │  │  ├─ models.py
 │  │  ├─ routes.py
@@ -53,10 +64,14 @@ Repository structure
 │  ├─ Dockerfile
 │  └─ requirements.txt
 ├─ frontend/
-│  ├─ app.js
+│  ├─ src/
+│  │  ├─ App.jsx                # Chat UI, session, i18n
+│  │  ├─ main.jsx
+│  │  └─ styles.css
 │  ├─ index.html
 │  ├─ nginx.conf
-│  ├─ style.css
+│  ├─ package.json
+│  ├─ vite.config.js
 │  └─ Dockerfile
 ├─ .devcontainer/
 │  └─ devcontainer.json
@@ -67,30 +82,29 @@ Repository structure
 
 ---
 
-API endpoints
+## API endpoints
 
-- POST /api/booking-request  
-  Inserts a booking request into the database.
-
-- GET /api/booking-requests  
-  Returns recently saved booking requests.
-
-- GET /health  
-  Backend health check.
-
-- GET /docs  
-  FastAPI interactive API documentation.
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/session/start` | Create or update a chat session with guest email |
+| `GET` | `/api/session/{session_id}` | Look up a session |
+| `POST` | `/api/chat` | Send a message; extract fields and return assistant reply |
+| `GET` | `/api/chat-history/{session_id}` | Return messages for a session |
+| `POST` | `/api/booking-request` | Direct insert (legacy / testing) |
+| `GET` | `/api/booking-requests` | List recent saved requests (JSON) |
+| `GET` | `/health` | Health check including LLM configuration status |
+| `GET` | `/docs` | FastAPI interactive API documentation |
 
 ---
 
-Run locally with Docker
+## Run locally with Docker
 
-Prerequisites
+### Prerequisites
 
 - Docker Desktop or Docker Engine
 - Docker Compose support
 
-Start the project
+### Start the project
 
 From the root of the repository:
 
@@ -98,12 +112,13 @@ From the root of the repository:
 docker compose up --build
 ```
 
-Open in browser
+### Open in browser
 
 - Frontend: http://localhost:8080
 - Backend docs: http://localhost:8000/docs
+- Health (LLM status): http://localhost:8000/health
 
-Stop the project
+### Stop the project
 
 ```bash
 docker compose down
@@ -117,7 +132,7 @@ docker compose down -v
 
 ---
 
-Run in GitHub Codespaces
+## Run in GitHub Codespaces
 
 1. Open the repository in GitHub Codespaces.
 2. Wait until the dev container finishes loading.
@@ -128,38 +143,40 @@ docker compose up --build
 ```
 
 4. Open the forwarded frontend port (8080).
-5. Click “Send Booking Request”.
-6. To verify the database insertion, open the backend docs and call GET /api/booking-requests.
-
-This setup allows the one-button flow to be tested directly inside Codespaces.
+5. Enter your email, start chatting, and send a booking-related message.
+6. Verify stored data via `GET /api/booking-requests` or `GET /api/chat-history/{session_id}` in the API docs.
 
 ---
 
-Environment variables
+## Environment variables
 
-Configuration is handled through environment variables.
+Configuration is handled through environment variables. Copy `.env.example` to `.env` for local overrides.
 
-Use .env.example as a template if needed.
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | PostgreSQL connection string for the backend |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Database container credentials |
+| `FRONTEND_PORT`, `BACKEND_PORT`, `DB_PORT` | Host port mappings |
+| `CORS_ALLOW_ORIGINS` | Allowed frontend origins (`*` by default) |
+| `LOG_LEVEL` | Backend log level |
+| `LLM_ENABLED` | `true` to use hosted LLM; `false` for rule-based replies only |
+| `LLM_PROVIDER` | `gemini` or `openai` |
+| `LLM_MODEL` | Model name (e.g. `gemini-2.5-flash`) |
+| `API_KEY` | Provider API key (also accepts `LLM_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`) |
+| `LLM_TIMEOUT_SECONDS` | Request timeout for LLM calls |
+| `LLM_MAX_HISTORY_MESSAGES` | Max prior turns sent to the LLM |
 
-Important variables include:
+**Never commit `.env` or API keys to the repository.**
 
-- DATABASE_URL
-- POSTGRES_DB
-- POSTGRES_USER
-- POSTGRES_PASSWORD
-- FRONTEND_PORT
-- BACKEND_PORT
-- DB_PORT
-
-No secrets should be committed to the repository.
+With `LLM_ENABLED=false` (the default), the app still works using rule-based extraction and replies.
 
 ---
 
-Team development workflow and AI tools
+## Team development workflow and AI tools
 
 This project is developed using a mix of human work and support from AI tools.
 
-Human responsibilities
+### Human responsibilities
 
 - Define project requirements and scope
 - Decide the architecture and technology stack
@@ -167,7 +184,7 @@ Human responsibilities
 - Run tests and verify that the full flow works
 - Decide what is finally committed to the repository
 
-AI tool support
+### AI tool support
 
 - Suggest project structure and boilerplate
 - Propose backend and frontend implementations
@@ -175,85 +192,69 @@ AI tool support
 - Assist with debugging and troubleshooting
 - Suggest simpler alternatives when something is too complex
 
-How AI is used in practice
+### How AI is used in practice
 
 AI tools are used to draft code and documentation while the developer focuses on planning and testing. Once a draft is generated, it is reviewed, simplified if needed, and only then added to the project.
 
-Keeping the project aligned
+### Keeping the project aligned
 
 To keep the project aligned with the proposal and the course requirements:
 
 - The project proposal is used as the main reference for scope and goals
-- This first milestone is kept small and easy to test
+- Milestones are kept testable end-to-end in Docker
 - All important changes are reviewed by a human
 - Only verified code is included in the submission
 
-Quality and traceability
+### Quality and traceability
 
 Content suggested by AI tools is treated as a draft until it is verified by:
 
 - Running Docker Compose
-- Testing the frontend button
+- Testing the chat flow (email → message → reply)
 - Checking saved records in the database
-- Reviewing logs and API behavior
+- Reviewing logs and API behavior (`/health`, `/docs`)
 
 Traceability is maintained through repository structure, documented endpoints, version control, and this README.
 
 ---
 
-Prototype and evaluation dimensions
+## Prototype and evaluation dimensions
 
-Performance  
-The prototype performs a simple API call and database insert, with low overhead.
-
-Development time  
-The scope is small so it can be built, tested, and demonstrated quickly.
-
-Cost  
-The stack uses open-source tools and can run on modest infrastructure.
-
-Accuracy  
-Each valid button click produces a single, well-defined database write.
-
-Usability  
-The interface is minimal and easy to understand during a demo.
-
-Security  
-Configuration uses environment variables; the database is accessed only through the backend.
-
-Scalability  
-Frontend, backend, and database are separate services and can be scaled independently later.
-
-Extensibility and maintainability  
-The codebase is split into clear folders and modules, making future AI receptionist features easier to add.
-
-Traceability  
-The request flow, endpoints, and structure are documented, and the development process is visible in the repository.
+| Dimension | Notes |
+|-----------|-------|
+| **Performance** | Chat requests involve DB reads/writes; LLM calls are optional and timeout-bounded |
+| **Development time** | Modular backend services and a single-page React frontend |
+| **Cost** | Open-source stack; LLM usage is optional and provider-billed |
+| **Accuracy** | Structured field extraction with session merge; LLM does not confirm bookings |
+| **Usability** | Multilingual chat UI with email gate and session restore |
+| **Security** | Secrets via environment variables; DB accessed only through the backend |
+| **Scalability** | Frontend, backend, and database are separate services |
+| **Extensibility** | Clear split between routes, extraction, LLM, and rule-based fallback |
+| **Traceability** | Full message history and extracted fields stored per session |
 
 ---
 
-Future roadmap
+## Future roadmap
 
 Next iterations can extend this base by adding:
 
-- conversational AI interaction
-- room availability and pricing checks
-- more detailed booking forms
-- staff/admin dashboard
-- workflow automation such as notifications
-- additional channels such as WhatsApp or voice
+- Room availability and pricing checks against real inventory
+- Staff/admin dashboard for reviewing conversations and requests
+- Workflow automation such as email notifications
+- Additional channels such as WhatsApp or voice
+- Stronger authentication and guest identity verification
 
 ---
 
-Purpose of this milestone
+## Purpose of this milestone
 
-This repository is meant to satisfy the current milestone requirement of a working one-button app that is:
+This repository demonstrates a working prototype that is:
 
-- frontend based
-- backend connected
-- database integrated
-- containerized
-- cloud-deployable
-- GitHub Codespaces compatible
+- Frontend based (React chat UI)
+- Backend connected (FastAPI with session and chat APIs)
+- Database integrated (PostgreSQL with sessions and booking requests)
+- AI-ready (optional LLM with safe rule-based fallback)
+- Containerized (Docker Compose)
+- Cloud-deployable and GitHub Codespaces compatible
 
-At the same time, it stays aligned with the long-term goal of building a single-hotel AI receptionist system.
+It serves as the technical foundation for the long-term goal of building a single-hotel AI receptionist system.
