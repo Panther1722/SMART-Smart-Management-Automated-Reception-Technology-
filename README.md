@@ -165,10 +165,114 @@ Configuration is handled through environment variables. Copy `.env.example` to `
 | `API_KEY` | Provider API key (also accepts `LLM_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`) |
 | `LLM_TIMEOUT_SECONDS` | Request timeout for LLM calls |
 | `LLM_MAX_HISTORY_MESSAGES` | Max prior turns sent to the LLM |
+| `LLM_CHAT_TEMPERATURE` | Reply creativity (default `0.6`; extraction stays low) |
+| `LLM_CHAT_MAX_TOKENS` | Max length of assistant replies (default `450`) |
+| `EMAIL_ENABLED` | `true` to send booking confirmation emails |
+| `SMTP_HOST` | SMTP server (e.g. `smtp.gmail.com`) |
+| `SMTP_PORT` | SMTP port (usually `587` for TLS) |
+| `SMTP_USER` | SMTP login / sender mailbox |
+| `SMTP_PASSWORD` | SMTP password or app password |
+| `EMAIL_FROM` | From address (defaults to `SMTP_USER`) |
+| `HOTEL_NAME` | Hotel name shown in the email subject and body |
+| `BOOKING_NOTIFY_EMAIL` | Optional staff inbox that receives a copy of each completed booking |
 
 **Never commit `.env` or API keys to the repository.**
 
+When a guest provides complete booking details (dates, guest count, name, email), the backend sends:
+
+1. **Guest confirmation** — to the email entered at session start
+2. **Staff notification** — to `BOOKING_NOTIFY_EMAIL` if set (use your own address for testing)
+
 With `LLM_ENABLED=false` (the default), the app still works using rule-based extraction and replies.
+
+---
+
+## Confirmation emails
+
+When email is configured, the backend sends **one confirmation email per chat session** after the guest provides complete booking details:
+
+- Request type: **booking**
+- Check-in and check-out dates
+- Guest count
+- Guest email (collected at session start)
+
+The email confirms the request was **received** — it is not a final reservation confirmation.
+
+### Gmail example (local `.env`)
+
+```env
+EMAIL_ENABLED=true
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=your-16-char-app-password
+EMAIL_FROM=you@gmail.com
+HOTEL_NAME=SMART Hotel
+BOOKING_NOTIFY_EMAIL=you@gmail.com
+```
+
+For Gmail, create an [App Password](https://myaccount.google.com/apppasswords) (requires 2-Step Verification). Use that value as `SMTP_PASSWORD`, not your normal Gmail password.
+
+Restart after changing `.env`:
+
+```bash
+docker compose up --build
+```
+
+Check status at http://localhost:8000/health — look for `"llm": { "active": true, "reply_mode": "llm" }` and `"email": { "enabled": true, "configured": true }`.
+
+### Test in chat
+
+1. Open http://localhost:8080 and enter your real email.
+2. Send a booking message with dates and guest count, for example:  
+   `I'd like to book a room from 25 June 2026 to 27 June 2026 for 2 guests. My name is Alex.`
+3. The assistant reply should mention that a confirmation email was sent.
+4. Check your inbox (and spam folder).
+
+---
+
+## Conversational design (examiner demo script)
+
+After the initial milestone, replies were refined for more natural dialogue while keeping safe guardrails. Use these scenarios when demonstrating or evaluating the prototype:
+
+### 1. Natural multi-turn booking
+
+Guest messages across several turns:
+
+1. `Hi, I'd like to stay with you next weekend.`
+2. `Friday to Sunday, 2 guests.`
+3. `My name is Alex.`
+
+**Expected:** The assistant acknowledges each turn, remembers prior details, and only asks for what is still missing.
+
+### 2. Correction across turns
+
+1. `Book a room from 25 June to 27 June for 2 guests.`
+2. `Sorry, checkout is Sunday the 28th, not the 27th.`
+
+**Expected:** Check-out updates without re-asking for guest count or check-in.
+
+### 3. Bounded openness (hotel-adjacent)
+
+`Do you have parking? What time is breakfast?`
+
+**Expected:** A short, helpful hospitality answer, then an offer to help with the stay or booking.
+
+### 4. Guardrail (off-topic)
+
+`Can you teach me Rust programming?`
+
+**Expected:** A polite decline and redirect to hotel assistance — not a programming lesson.
+
+### Verify LLM is active
+
+Open http://localhost:8000/health and confirm:
+
+```json
+"llm": { "enabled": true, "configured": true, "active": true, "reply_mode": "llm" }
+```
+
+If `reply_mode` is `rule_based`, replies will feel more templated. Enable the LLM in `.env` and restart Docker.
 
 ---
 
@@ -225,8 +329,8 @@ Traceability is maintained through repository structure, documented endpoints, v
 | **Performance** | Chat requests involve DB reads/writes; LLM calls are optional and timeout-bounded |
 | **Development time** | Modular backend services and a single-page React frontend |
 | **Cost** | Open-source stack; LLM usage is optional and provider-billed |
-| **Accuracy** | Structured field extraction with session merge; LLM does not confirm bookings |
-| **Usability** | Multilingual chat UI with email gate and session restore |
+| **Accuracy** | Structured field extraction with session merge; multi-turn corrections; LLM does not confirm bookings |
+| **Usability** | Multilingual chat UI with natural LLM replies and tiered hospitality guardrails |
 | **Security** | Secrets via environment variables; DB accessed only through the backend |
 | **Scalability** | Frontend, backend, and database are separate services |
 | **Extensibility** | Clear split between routes, extraction, LLM, and rule-based fallback |
@@ -240,7 +344,6 @@ Next iterations can extend this base by adding:
 
 - Room availability and pricing checks against real inventory
 - Staff/admin dashboard for reviewing conversations and requests
-- Workflow automation such as email notifications
 - Additional channels such as WhatsApp or voice
 - Stronger authentication and guest identity verification
 

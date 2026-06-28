@@ -71,6 +71,22 @@ def _booking_requests_schema_is_current() -> bool:
     return existing == BOOKING_REQUESTS_COLUMNS
 
 
+def _ensure_chat_sessions_columns() -> None:
+    """Add new chat_sessions columns on existing databases without a full reset."""
+    inspector = inspect(engine)
+    if not inspector.has_table("chat_sessions"):
+        return
+    existing = {column["name"] for column in inspector.get_columns("chat_sessions")}
+    if "confirmation_email_sent_at" not in existing:
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "ALTER TABLE chat_sessions "
+                    "ADD COLUMN confirmation_email_sent_at TIMESTAMPTZ"
+                )
+            )
+
+
 def ensure_schema(base) -> None:
     """Create tables and replace booking_requests when the schema changed."""
     from .models import BookingRequest
@@ -81,3 +97,4 @@ def ensure_schema(base) -> None:
             BookingRequest.__table__.drop(engine, checkfirst=True)
 
     base.metadata.create_all(bind=engine)
+    _ensure_chat_sessions_columns()

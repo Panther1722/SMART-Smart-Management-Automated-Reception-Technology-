@@ -148,4 +148,11 @@ class SessionOut(BaseModel):
     session_id: str
     guest_email: str
 
+
+class EmailTestResponse(BaseModel):
+    ok: bool
+    message: str
+    provider: str
+    mailpit_ui: str | None = None
+
     model_config = {"from_attributes": True}

@@ -9,7 +9,7 @@ import re
 from datetime import date, datetime
 
 import httpx
-from .chat_rules import build_reply
+from .chat_rules import build_reply, conversation_stage, missing_booking_fields
 from .field_extraction import ExtractedFields
 from .schemas import LLMExtractionResult
 
@@ -36,26 +36,42 @@ def _temporal_grounding_prefix() -> str:
     )
 
 
-SYSTEM_PROMPT = """You are a helpful hotel receptionist for a single boutique hotel prototype (SMART Hotel).
-Assist guests with booking inquiries, availability questions, pricing questions, and cancellation requests.
+SYSTEM_PROMPT = """You are a warm, professional hotel receptionist at SMART Hotel, a single boutique hotel prototype.
 
-Guidelines:
-- Be concise, polite, and practical (usually 2-4 sentences).
-- Do NOT invent room availability, prices, or confirmed bookings.
-- Do NOT claim a reservation is confirmed; you can only collect details and say the team will follow up.
-- If important booking details are missing (check-in, check-out, guest count, or name when relevant), ask friendly follow-up questions.
-- Use any extracted guest details from the context naturally when they are provided.
-- Stay focused on reception duties for one hotel."""
+Your role:
+- Help guests with bookings, availability, pricing, cancellations, and hotel-related questions (check-in times, breakfast, parking, amenities, local tips).
+- Conduct a natural conversation — acknowledge what the guest just said, refer back to earlier details when relevant, and vary your phrasing.
+
+Conversation style:
+- Sound like a real receptionist, not a form. Usually 2–5 sentences.
+- If the guest greets you or makes small talk, respond briefly and warmly, then offer help.
+- If the guest corrects earlier details ("actually…", "I meant…"), confirm the update clearly.
+- If details are still missing for a booking, ask only for what is missing — do not re-ask for information already provided.
+- Use the structured session context (collected fields, missing fields, conversation stage, last question you asked) naturally.
+
+Boundaries (tiered):
+- Always help: hotel services, stay details, directions, and booking-related requests.
+- Brief friendly exchange: one or two sentences of empathy or hospitality, then steer back to how you can help.
+- Politely decline: unrelated tasks (e.g. tutoring programming, medical or legal advice, long off-topic requests). Offer hotel assistance instead.
+
+Hard limits:
+- Do NOT invent room availability, prices, or confirmed reservations.
+- Do NOT claim a booking is confirmed; say the team will follow up after you collect the details.
+- When all booking details are collected, the system automatically sends a confirmation email to the guest — mention this naturally; never ask staff or the guest to send email manually."""
 
 EXTRACTION_SYSTEM_PROMPT = """You extract structured booking data from hotel guest chat messages for SMART Hotel.
 Return JSON only. No markdown, no explanation, no extra text.
 
 Rules:
 - Do NOT invent confirmed bookings, room availability, or prices.
+- Read the latest user message together with recent chat history — corrections override earlier values.
+- Phrases like "actually", "I meant", "change that to", "not X but Y" should update the relevant field.
+- Use session context as a baseline; return the best current value for each field supported by message and history.
 - Use null for any field that is unclear or not stated in the message/history.
 - Do NOT guess dates; only extract dates explicitly mentioned or clearly implied.
 - guests_count must be a positive integer when present, otherwise null.
 - request_type must be one of: booking, cancellation, pricing, availability, general inquiry.
+- Use "general inquiry" for greetings, hotel amenities, parking, breakfast, directions, or small talk without a booking intent.
 - missing_fields must list field names still needed for a booking inquiry (e.g. check_in, guest_name).
 - confidence is a number from 0.0 to 1.0 for how certain you are about the extracted values.
 
@@ -91,6 +107,22 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _chat_temperature() -> float:
+    return _env_float("LLM_CHAT_TEMPERATURE", 0.6)
+
+
+def _chat_max_tokens() -> int:
+    return _env_int("LLM_CHAT_MAX_TOKENS", 450)
+
+
 def is_llm_enabled() -> bool:
     return _env_bool("LLM_ENABLED", default=False)
 
@@ -106,14 +138,25 @@ def _get_api_key() -> str:
     )
 
 
-def get_llm_config() -> dict[str, str | bool | int]:
+def get_llm_config() -> dict[str, str | bool | int | float]:
+    configured = bool(
+        os.getenv("LLM_PROVIDER", "").strip()
+        and os.getenv("LLM_MODEL", "").strip()
+        and _get_api_key()
+    )
+    enabled = is_llm_enabled()
     return {
-        "enabled": is_llm_enabled(),
+        "enabled": enabled,
+        "configured": configured,
+        "active": enabled and configured,
+        "reply_mode": "llm" if enabled and configured else "rule_based",
         "provider": os.getenv("LLM_PROVIDER", "").strip(),
         "model": os.getenv("LLM_MODEL", "").strip(),
         "has_api_key": bool(_get_api_key()),
         "timeout_seconds": _env_int("LLM_TIMEOUT_SECONDS", 15),
         "max_history_messages": _env_int("LLM_MAX_HISTORY_MESSAGES", 20),
+        "chat_temperature": _chat_temperature(),
+        "chat_max_tokens": _chat_max_tokens(),
     }
 
 
@@ -151,9 +194,18 @@ def generate_chat_reply(
     *,
     request_type: str,
     fallback_reply: str | None = None,
+    email_sent: bool = False,
+    email_recipient: str | None = None,
+    booking_ready: bool = False,
 ) -> str:
     """Generate an assistant reply with LLM when enabled, else rule-based fallback."""
-    fallback = fallback_reply or build_reply(request_type, extracted_fields)
+    fallback = fallback_reply or build_reply(
+        request_type,
+        extracted_fields,
+        email_sent=email_sent,
+        email_recipient=email_recipient,
+        booking_ready=booking_ready,
+    )
 
     if not is_llm_enabled():
         logger.debug("LLM disabled; using rule-based reply")
@@ -163,7 +215,13 @@ def generate_chat_reply(
         return _call_llm_provider_text(
             message=message,
             chat_history=chat_history,
-            context_block=_build_context_block(extracted_fields, request_type),
+            context_block=_build_context_block(
+                extracted_fields,
+                request_type,
+                chat_history=chat_history,
+                email_sent=email_sent,
+                email_recipient=email_recipient,
+            ),
             system_prompt=SYSTEM_PROMPT,
         )
     except Exception:  # noqa: BLE001 - safe fallback for any provider failure
@@ -196,14 +254,54 @@ def _build_extraction_context(
         lines.append(f"Session request_type: {session_request_type}")
     lines.append(_format_fields_block(session_fields))
     lines.append(
-        "Extract only what is supported by the latest user message and recent history. "
-        "Prefer null over guessing."
+        "Use session data as the baseline. Apply updates from the latest user message and recent history. "
+        "Corrections and clarifications (e.g. 'actually checkout is Sunday') override earlier values. "
+        "Return the best current value for each field supported by the message and history. "
+        "Prefer null over guessing when still uncertain."
     )
     return "\n".join(lines)
 
 
-def _build_context_block(extracted_fields: ExtractedFields, request_type: str) -> str:
-    lines = [f"Detected request type: {request_type}", _format_fields_block(extracted_fields)]
+def _last_assistant_message(chat_history: list[ChatTurn]) -> str | None:
+    for turn in reversed(chat_history):
+        if turn.get("role") == "assistant":
+            content = (turn.get("content") or "").strip()
+            if content:
+                return content
+    return None
+
+
+def _build_context_block(
+    extracted_fields: ExtractedFields,
+    request_type: str,
+    *,
+    chat_history: list[ChatTurn] | None = None,
+    email_sent: bool = False,
+    email_recipient: str | None = None,
+) -> str:
+    stage = conversation_stage(extracted_fields, request_type)
+    missing = missing_booking_fields(extracted_fields)
+    lines = [
+        f"Detected request type: {request_type}",
+        f"Conversation stage: {stage}",
+        _format_fields_block(extracted_fields),
+    ]
+    if missing:
+        lines.append(f"Still needed for booking: {', '.join(missing)}")
+    else:
+        lines.append("All core booking fields collected (check-in, check-out, guests, name).")
+    if email_sent:
+        recipient = email_recipient or extracted_fields.guest_email or "the guest"
+        lines.append(
+            f"A confirmation email with the booking details was just sent automatically to {recipient}."
+        )
+    last_question = _last_assistant_message(chat_history or [])
+    if last_question:
+        lines.append(f"Your last message to the guest: {last_question}")
+    lines.append(
+        "Respond naturally to the guest's latest message. Acknowledge what they said and "
+        "only ask for missing details listed above."
+    )
     return "Structured context for this session:\n" + "\n".join(lines)
 
 
@@ -333,7 +431,12 @@ def _call_openai_text(
     api_key: str,
 ) -> str:
     messages = _openai_messages(chat_history, message, system_prompt, context_block)
-    payload = {"model": model, "messages": messages, "temperature": 0.4, "max_tokens": 300}
+    payload = {
+        "model": model,
+        "messages": messages,
+        "temperature": _chat_temperature(),
+        "max_tokens": _chat_max_tokens(),
+    }
     data = _post_json(
         _OPENAI_API_URL,
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -398,9 +501,10 @@ def _call_anthropic_text(
 ) -> str:
     payload = {
         "model": model,
-        "max_tokens": 300,
+        "max_tokens": _chat_max_tokens(),
         "system": f"{system_prompt}\n\n{context_block}",
         "messages": _anthropic_messages(chat_history, message),
+        "temperature": _chat_temperature(),
     }
     data = _post_json(
         _ANTHROPIC_API_URL,
@@ -468,7 +572,10 @@ def _call_gemini_text(
     payload = {
         "systemInstruction": {"parts": [{"text": f"{temporal_prefix}{system_prompt}\n\n{context_block}"}]},
         "contents": _gemini_contents(chat_history, message),
-        "generationConfig": {"temperature": 0.4, "maxOutputTokens": 300},
+        "generationConfig": {
+            "temperature": _chat_temperature(),
+            "maxOutputTokens": _chat_max_tokens(),
+        },
     }
     data = _post_gemini(model, api_key, payload)
     return _non_empty_text(data["candidates"][0]["content"]["parts"][0]["text"], "Gemini")

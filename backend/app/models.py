@@ -15,6 +15,10 @@ class ChatSession(Base):
 
     session_id: Mapped[str] = mapped_column(String(100), primary_key=True)
     guest_email: Mapped[str] = mapped_column(String(320), nullable=False)
+    confirmation_email_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

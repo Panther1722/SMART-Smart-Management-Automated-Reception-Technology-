@@ -99,8 +99,9 @@ _DEFAULT_REPLIES: dict[str, str] = {
         "What check-in and check-out dates are you looking at, and how many guests?"
     ),
     REQUEST_TYPE_GENERAL: (
-        "Thank you for reaching out. I'm here to help with bookings, availability, "
-        "pricing, and cancellations. What would you like to know?"
+        "Thank you for reaching out — I'm glad to help. I can assist with bookings, "
+        "availability, pricing, cancellations, and questions about the hotel. "
+        "What would you like to know?"
     ),
 }
 
@@ -118,10 +119,58 @@ def detect_request_type(message: str) -> str:
     return REQUEST_TYPE_GENERAL
 
 
-def build_reply(request_type: str, fields: ExtractedFields) -> str:
+def missing_booking_fields(fields: ExtractedFields) -> list[str]:
+    """Field names still needed for a complete booking inquiry."""
+    missing: list[str] = []
+    if fields.check_in is None:
+        missing.append("check_in")
+    if fields.check_out is None:
+        missing.append("check_out")
+    if fields.guests_count is None:
+        missing.append("guests_count")
+    if not fields.guest_name:
+        missing.append("guest_name")
+    return missing
+
+
+def conversation_stage(fields: ExtractedFields, request_type: str) -> str:
+    """High-level dialogue phase for LLM context."""
+    if request_type in BOOKING_RELATED_TYPES:
+        has_any = any(
+            (
+                fields.check_in,
+                fields.check_out,
+                fields.guests_count,
+                fields.guest_name,
+            )
+        )
+        if not has_any:
+            return "greeting_or_early_inquiry"
+        if missing_booking_fields(fields):
+            return "collecting_booking_details"
+        return "booking_details_complete"
+    if request_type == REQUEST_TYPE_CANCELLATION:
+        return "cancellation_inquiry"
+    return "general_conversation"
+
+
+def build_reply(
+    request_type: str,
+    fields: ExtractedFields,
+    *,
+    email_sent: bool = False,
+    email_recipient: str | None = None,
+    booking_ready: bool = False,
+) -> str:
     """Return a receptionist-style reply based on intent and extracted fields."""
     if request_type in BOOKING_RELATED_TYPES:
-        return _build_booking_related_reply(request_type, fields)
+        return _build_booking_related_reply(
+            request_type,
+            fields,
+            email_sent=email_sent,
+            email_recipient=email_recipient,
+            booking_ready=booking_ready,
+        )
 
     if request_type == REQUEST_TYPE_CANCELLATION:
         return _build_cancellation_reply(fields)
@@ -129,12 +178,25 @@ def build_reply(request_type: str, fields: ExtractedFields) -> str:
     return _DEFAULT_REPLIES.get(request_type, _DEFAULT_REPLIES[REQUEST_TYPE_GENERAL])
 
 
-def _build_booking_related_reply(request_type: str, fields: ExtractedFields) -> str:
+def _build_booking_related_reply(
+    request_type: str,
+    fields: ExtractedFields,
+    *,
+    email_sent: bool = False,
+    email_recipient: str | None = None,
+    booking_ready: bool = False,
+) -> str:
     has_dates = fields.check_in is not None and fields.check_out is not None
     has_guests = fields.guests_count is not None
 
     if has_dates and has_guests:
-        return _confirmation_reply(fields, request_type)
+        return _confirmation_reply(
+            fields,
+            request_type,
+            email_sent=email_sent,
+            email_recipient=email_recipient,
+            booking_ready=booking_ready,
+        )
 
     missing: list[str] = []
     if fields.check_in is None:
@@ -183,7 +245,27 @@ def _build_cancellation_reply(fields: ExtractedFields) -> str:
     return _DEFAULT_REPLIES[REQUEST_TYPE_CANCELLATION]
 
 
-def _confirmation_reply(fields: ExtractedFields, request_type: str) -> str:
+def is_booking_ready_for_confirmation(fields: ExtractedFields, request_type: str) -> bool:
+    """True when we have enough booking details to send a confirmation email."""
+    if request_type in (REQUEST_TYPE_CANCELLATION, REQUEST_TYPE_GENERAL):
+        return False
+    return (
+        fields.check_in is not None
+        and fields.check_out is not None
+        and fields.guests_count is not None
+        and bool(fields.guest_name)
+        and bool(fields.guest_email)
+    )
+
+
+def _confirmation_reply(
+    fields: ExtractedFields,
+    request_type: str,
+    *,
+    email_sent: bool = False,
+    email_recipient: str | None = None,
+    booking_ready: bool = False,
+) -> str:
     guest_part = f"Thank you, {fields.guest_name}. " if fields.guest_name else "Thank you. "
     stay_part = (
         f"I have noted a stay from {fields.check_in.strftime('%d %B %Y')} "
@@ -195,12 +277,22 @@ def _confirmation_reply(fields: ExtractedFields, request_type: str) -> str:
         action = "I'll share suitable rates for those dates."
     elif request_type == REQUEST_TYPE_AVAILABILITY:
         action = "I'll check availability for those dates."
+    elif email_sent:
+        recipient = email_recipient or fields.guest_email or "your email address"
+        action = (
+            f"We've automatically sent a confirmation email with your booking details to {recipient}. "
+            "Our team will review availability and follow up shortly."
+        )
+    elif booking_ready and request_type == REQUEST_TYPE_BOOKING:
+        recipient = fields.guest_email or "your email address"
+        action = (
+            f"Your booking request is saved and our team will follow up at {recipient} "
+            "to confirm availability."
+        )
     else:
         action = "I'll pass this to our team to confirm availability."
 
     extra_parts: list[str] = []
-    if fields.guest_email:
-        extra_parts.append(f"email: {fields.guest_email}")
     if fields.guest_phone:
         extra_parts.append(f"phone: {fields.guest_phone}")
     if fields.special_request:

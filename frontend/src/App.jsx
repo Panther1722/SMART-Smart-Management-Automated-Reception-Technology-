@@ -32,6 +32,8 @@ const COPY = {
     emailRequired: "Please enter your email address.",
     emailInvalid: "Please enter a valid email address.",
     sessionStartError: (msg) => `Could not start session. ${msg}`,
+    sessionStartNetworkError:
+      "Could not reach the server. Run `docker compose up` and open http://localhost:8080.",
     continueToChat: "Continue to chat",
     starting: "Starting…",
     chatAriaLabel: "Chat",
@@ -202,6 +204,21 @@ const COPY = {
     landingAriaLabel: "Bienvenido",
   },
 };
+
+function isNetworkFetchError(message) {
+  return /failed to fetch|networkerror|load failed/i.test(message || "");
+}
+
+function sessionStartErrorMessage(t, err) {
+  const msg = err?.message || "Unknown error";
+  if (isNetworkFetchError(msg)) {
+    return (
+      t.sessionStartNetworkError ||
+      "Could not reach the server. Run `docker compose up` and open http://localhost:8080."
+    );
+  }
+  return t.sessionStartError(msg);
+}
 
 function getCopy(language) {
   return COPY[language] ?? COPY.en;
@@ -422,7 +439,7 @@ export default function App() {
       setSessionReady(true);
       setMessages([greetingMessage(language)]);
     } catch (err) {
-      setEmailError(t.sessionStartError(err.message));
+      setEmailError(sessionStartErrorMessage(t, err));
     } finally {
       setStartingSession(false);
     }

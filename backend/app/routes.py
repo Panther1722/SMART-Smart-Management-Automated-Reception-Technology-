@@ -2,6 +2,8 @@ import logging
 
 import uuid
 
+from datetime import datetime, timezone
+
 from typing import List
 
 
@@ -14,9 +16,17 @@ from sqlalchemy.orm import Session
 
 
 
-from .chat_rules import build_reply
+from .chat_rules import build_reply, is_booking_ready_for_confirmation
 
 from .database import get_db
+
+from .email_service import (
+    get_email_config,
+    is_email_enabled,
+    send_booking_confirmation,
+    send_staff_booking_notification,
+    send_test_email,
+)
 
 from .extraction_service import resolve_extraction, session_request_type_from_rows
 
@@ -39,6 +49,8 @@ from .schemas import (
     ChatRequest,
 
     ChatResponse,
+
+    EmailTestResponse,
 
     SessionOut,
 
@@ -390,9 +402,48 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 
         merged_fields = merge_fields(merged_fields, ExtractedFields(guest_email=session_email))
 
+    chat_session = _get_chat_session(db, session_id)
+    email_recipient = merged_fields.guest_email or session_email
+    email_sent = False
+    booking_ready = is_booking_ready_for_confirmation(merged_fields, request_type)
+    if (
+        chat_session is not None
+        and chat_session.confirmation_email_sent_at is None
+        and booking_ready
+        and is_email_enabled()
+    ):
+        if send_booking_confirmation(
+            email_recipient,
+            merged_fields,
+            request_type=request_type,
+        ):
+            send_staff_booking_notification(
+                merged_fields,
+                guest_email=email_recipient,
+                request_type=request_type,
+            )
+            chat_session.confirmation_email_sent_at = datetime.now(timezone.utc)
+            email_sent = True
+        else:
+            logger.error(
+                "Booking complete but confirmation email failed for session_id=%s recipient=%s",
+                session_id,
+                email_recipient,
+            )
+    elif booking_ready and not is_email_enabled():
+        logger.warning(
+            "Booking complete but email not sent (SMTP not configured) session_id=%s recipient=%s",
+            session_id,
+            email_recipient,
+        )
 
-
-    fallback_reply = build_reply(request_type, merged_fields)
+    fallback_reply = build_reply(
+        request_type,
+        merged_fields,
+        email_sent=email_sent,
+        email_recipient=email_recipient if email_sent else None,
+        booking_ready=booking_ready,
+    )
 
     reply = generate_chat_reply(
 
@@ -405,6 +456,12 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
         request_type=request_type,
 
         fallback_reply=fallback_reply,
+
+        email_sent=email_sent,
+
+        email_recipient=email_recipient if email_sent else None,
+
+        booking_ready=booking_ready,
 
     )
 
@@ -487,6 +544,7 @@ def chat(payload: ChatRequest, db: Session = Depends(get_db)):
 def health():
 
     llm = get_llm_config()
+    email = get_email_config()
 
     return {
 
@@ -496,14 +554,74 @@ def health():
 
             "enabled": llm["enabled"],
 
+            "configured": llm["configured"],
+
+            "active": llm["active"],
+
+            "reply_mode": llm["reply_mode"],
+
             "provider": llm["provider"],
 
             "model": llm["model"],
 
-            "configured": bool(llm["provider"] and llm["model"] and llm["has_api_key"]),
+            "chat_temperature": llm["chat_temperature"],
+
+            "chat_max_tokens": llm["chat_max_tokens"],
+
+        },
+
+        "email": {
+
+            "enabled": email["enabled"],
+
+            "configured": email["configured"],
+
+            "provider": email["provider"],
+
+            "smtp_host": email["smtp_host"],
+
+            "mailpit_mode": email["mailpit_mode"],
+
+            "mailpit_ui": email["mailpit_ui"] if email["mailpit_mode"] else None,
+
+            "resend_configured": email["resend_configured"],
+
+            "notify_email_set": bool(email.get("notify_email")),
 
         },
 
     }
 
 
+@router.post("/api/email/test", response_model=EmailTestResponse)
+def test_email():
+    """Send a test booking email to BOOKING_NOTIFY_EMAIL or SMTP_USER."""
+    cfg = get_email_config()
+    recipient = str(cfg.get("notify_email") or cfg.get("smtp_user") or "").strip()
+    if not recipient:
+        raise HTTPException(
+            status_code=400,
+            detail="Set BOOKING_NOTIFY_EMAIL or SMTP_USER in .env first.",
+        )
+    if not is_email_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Email is not configured. Set Mailpit SMTP or RESEND_API_KEY in .env.",
+        )
+
+    ok = send_test_email(recipient)
+    provider = str(cfg["provider"])
+    mailpit_ui = str(cfg["mailpit_ui"]) if cfg["mailpit_mode"] else None
+    if ok and cfg["mailpit_mode"]:
+        message = f"Test email captured by Mailpit for {recipient}. Open {mailpit_ui} to view it."
+    elif ok:
+        message = f"Test email sent to {recipient}."
+    else:
+        message = f"Failed to send test email to {recipient}. Check backend logs."
+
+    return EmailTestResponse(
+        ok=ok,
+        message=message,
+        provider=provider,
+        mailpit_ui=mailpit_ui,
+    )

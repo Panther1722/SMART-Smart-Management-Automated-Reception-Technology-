@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import ensure_schema, wait_for_db
+from .email_service import get_email_config, is_email_enabled
 from .models import Base
 from .routes import router
 
@@ -49,5 +50,14 @@ def on_startup() -> None:
     wait_for_db()
     logger.info("Creating database tables (if missing)...")
     ensure_schema(Base)
+    email = get_email_config()
+    if email["enabled"] and not email["configured"]:
+        logger.warning(
+            "EMAIL_ENABLED is on but SMTP is incomplete — set SMTP_USER, SMTP_PASSWORD, and EMAIL_FROM in .env"
+        )
+    elif is_email_enabled():
+        logger.info("Booking confirmation emails are enabled (SMTP: %s)", email["smtp_host"])
+    else:
+        logger.info("Booking confirmation emails are disabled")
     logger.info("Startup complete.")
 

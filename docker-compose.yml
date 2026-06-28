@@ -31,9 +31,28 @@ services:
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_TIMEOUT_SECONDS: ${LLM_TIMEOUT_SECONDS:-15}
       LLM_MAX_HISTORY_MESSAGES: ${LLM_MAX_HISTORY_MESSAGES:-20}
+      LLM_CHAT_TEMPERATURE: ${LLM_CHAT_TEMPERATURE:-0.6}
+      LLM_CHAT_MAX_TOKENS: ${LLM_CHAT_MAX_TOKENS:-450}
+      EMAIL_ENABLED: ${EMAIL_ENABLED:-false}
+      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
+      HOTEL_NAME: ${HOTEL_NAME:-SMART Hotel}
+      BOOKING_NOTIFY_EMAIL: ${BOOKING_NOTIFY_EMAIL:-}
+      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-auto}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM: ${RESEND_FROM:-}
+      RESEND_ALLOWED_TO: ${RESEND_ALLOWED_TO:-}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+      SMTP_USE_SSL: ${SMTP_USE_SSL:-false}
+      MAILPIT_UI_URL: ${MAILPIT_UI_URL:-http://localhost:8025}
     depends_on:
       db:
         condition: service_healthy
+      mailpit:
+        condition: service_started
     ports:
       - "${BACKEND_PORT:-8000}:8000"
 
@@ -44,6 +63,12 @@ services:
       - backend
     ports:
       - "${FRONTEND_PORT:-8080}:8080"
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
 
 volumes:
   postgres_data:

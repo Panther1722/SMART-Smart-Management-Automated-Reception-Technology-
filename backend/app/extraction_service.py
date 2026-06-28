@@ -83,11 +83,26 @@ def resolve_request_type(
     if llm_type and llm_confidence >= 0.6:
         if _priority(llm_type) > _priority(current_signal):
             current_signal = llm_type
+        elif (
+            llm_type == REQUEST_TYPE_GENERAL
+            and llm_confidence >= 0.65
+            and rule_type == REQUEST_TYPE_GENERAL
+        ):
+            # Amenities, small talk, or other hotel-adjacent questions — use conversational
+            # reply mode without discarding accumulated session fields.
+            current_signal = REQUEST_TYPE_GENERAL
 
     if not session_type:
         return current_signal
     if _priority(current_signal) > _priority(session_type):
         return current_signal
+    if (
+        current_signal == REQUEST_TYPE_GENERAL
+        and rule_type == REQUEST_TYPE_GENERAL
+        and llm_type == REQUEST_TYPE_GENERAL
+        and llm_confidence >= 0.65
+    ):
+        return REQUEST_TYPE_GENERAL
     return session_type
 
 
